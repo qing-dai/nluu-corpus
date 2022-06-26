@@ -1,0 +1,225 @@
+---
+title: "A corpus of Nluu"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+
+```
+
+# A small corpus of Nluu
+
+
+*Nluu* is an endangered language of the *Tuu* language family from Afrika. The
+language is not being actively spoken since its handful of speakers (2 as of 
+2020) live in different villages and do not have direct contact to each other. 
+Nluu has one of the most complex sounding phonetic inventories in the world with
+over 100 different phonemes, 45 of which are clicks. 
+
+A transcribed recording session of *Nluu* was kindly provided to us by Alena 
+Witzlack-Makarevich (of Hebrew University of Jerusalem). I have converted this
+corpus to a CSV (comma-separated values) file that can be easily imported to
+R. 
+
+Let's load the corpus and inspect it!
+
+```{r}
+corpus <- read_csv("nuu.csv",  col_types = cols())
+corpus
+```
+
+# inspect the corpus data and describe the meaning of the individual columns as well as the structural relationships between them. What are the objects of description in this dataset? Sketch a simple entity-relationship diagram for this dataset and insert it as an image. 
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics('./nluu structural diagram.jpeg')
+```
+
+
+
+# Inspectign individual entries
+
+# Extract the 24th utterance and count it's elements (words and morphemes). Write down this utterance as a glossed example. 
+
+```{r}
+uttrance_24 <- corpus %>% filter(record.id=="24")
+uttrance_24 %>% distinct(word) %>% count()
+# 4 distinct words
+uttrance_24 %>% distinct(morpheme.id) %>% count()
+# 6 distinct morphmes
+uttrance_24 %>% select(gloss, word)
+# 
+```
+
+# Part of speech exploration
+
+# what are the 5 most frequent part of speech types in the corpus?
+```{r}
+sort(table(corpus$ps),decreasing = TRUE)[1:5]
+```
+
+# find the 10 most frequent nouns
+```{r}
+n_list <- corpus %>% filter(ps=="n")
+sort(table(n_list$word),decreasing = TRUE)[1:10]
+# due to encoding problem, the output below may not be consistent with the original
+```
+
+# add a new column to the dataset, `stem_lexical_type`. It should be "pro" for pronouns, "n" for nouns, "v" for verbs and "other" for everythign else.
+
+
+```{r}
+corpus <- mutate(corpus,stem_lexical_type =case_when(
+  ps == 'pro' ~ "pro",
+  ps == "n"  ~ "n",
+  ps %in% c("vtr", "vitr","vatr") ~ "v",
+  TRUE ~ "others"
+))
+corpus
+```
+
+**TODO** (advanced, only if you want a challenge!): and now something more difficult — do the same as above, but at the word level and not the stem level! Call this column `word_lexical_type`
+
+# Noun to verb ratio
+
+
+Noun to verb ratio is a number that tells us how many nominal elements speakers 
+produce in relation to verbal elements — or roughtly, how many nouns are there 
+per sentence. This is a measure of referential density, or how much specific
+information speakers tend to give per unit of event or state description. While 
+in some languages/cultures one expects to be rather detailed here, so with a 
+high noun to verb ratio,  (e.g. *'A girl wearing a flowery bonet entered the 
+bookstore with large windows and smiled at the old bookkeeper who was just 
+enjoying his morning coffee'*) where in some other language the same information 
+could be conveyed as (*'came in, smiled'*). 
+
+Noun to verb ratio is computed as follows (the $+1$ in the denominator to 
+prevent division by zero):
+
+$$
+N2V = \frac{n(Noun)}{n(Verb)+1}
+$$
+
+Nouns here may or may not include other elements such as pronouns or 
+demonstrative pronouns. We compute N2V per utterance.
+
+#compute the N2V for all the utterances in the corpus, once taking both pronouns and nouns, and once takign only nouns into account. The output here should be a table with columns `record.id`, `speaker`, `N2V.NPro` and `N2V.N`, with one row per utterance. 
+```{r}
+re_den_table <- corpus %>% group_by(record.id, speaker) %>% summarize(N2V.NPro = sum(stem_lexical_type == "pro", stem_lexical_type == "n" )/(1 + sum(stem_lexical_type == "v")), N2V.N = sum(stem_lexical_type == "n")/(1 + sum(stem_lexical_type == "v"))) 
+
+
+re_den_table
+# "pro" and "n" should be able to grouped more neatly
+```
+
+# obtain the N2V summaries (median and standard deviation) of N2V per speaker. The output should be a table with columns `speaker`, `N2V.NPro.median`, `N2V.NPro.sd`, `N2V.N.median`, `N2V.N.sd`
+```{r}
+speaker_ratio <- re_den_table %>% group_by(speaker) %>% summarize(N2V.NPro.median = median(N2V.NPro), N2V.NPro.sd = sd(N2V.NPro), N2V.N.median = median(N2V.N), N2V.N.sd = sd(N2V.N))
+speaker_ratio
+```
+
+```{r}
+library(shiny)
+```
+
+```{r}
+ggplot(re_den_table, aes(x=speaker, y= N2V.N)) +
+  geom_point() +
+  geom_violin(aes(fill=factor(speaker)))
+
+```
+
+#produce a [violin plot visualisation](https://ggplot2.tidyverse.org/reference/geom_violin.html) comparing the N2V ratios per speaker. Only take the N2V for nouns (ignoring pronouns) and restrict the data to only the most common speakers (cutoff criteria on your discretion)
+
+```{r}
+
+speakers = c("A","B","C","D","E","F","G","H","I","J")
+
+ui <- fluidPage(
+  titlePanel("Nluu Corpus Explorer"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("Speaker","Enter two Speakers",  
+                  choices= speakers,selected=speakers[1:2],
+                  multiple = TRUE)
+    ),
+    mainPanel(
+      plotOutput("trend")
+    )
+  )
+)
+
+server <- function(input,output,session) {
+    output$trend <- renderPlot({
+      data_name <- re_den_table %>%
+        subset(speaker %in% input$Speaker)
+        
+      ggplot(subset(re_den_table,speaker %in% input$Speaker),
+             aes(x=speaker,y=N2V.N)) + 
+        geom_point() +
+        geom_violin(aes(fill=factor(speaker)))
+
+        
+    })
+  
+}
+
+shinyApp(ui=ui,server = server)
+
+
+```
+```{r}
+ui <- fluidPage(
+  titlePanel('Explore Cuisines'),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput('cuisine', 'Select Cuisine', unique(recipes$cuisine)),
+      sliderInput('nb_ingredients', 'Select No. of Ingredients', 5, 100, 20),
+    ),
+    mainPanel(
+      tabsetPanel(
+        # CODE BELOW: Add `d3wordcloudOutput` named `wc_ingredients` in a `tabPanel`
+        tabPanel('Word Cloud', d3wordcloud::d3wordcloudOutput('wc_ingredients', height = '400')),
+        tabPanel('Plot', plotly::plotlyOutput('plot_top_ingredients')),
+        tabPanel('Table', DT::DTOutput('dt_top_ingredients'))
+      )
+    )
+  )
+)
+server <- function(input, output, session){
+  # CODE BELOW: Render an interactive wordcloud of top distinctive ingredients 
+  # and the number of recipes they get used in, using 
+  # `d3wordcloud::renderD3wordcloud`, and assign it to an output named
+  # `wc_ingredients`.
+  output$wc_ingredients <- d3wordcloud::renderD3wordcloud({
+     ingredients_df <- rval_top_ingredients()
+     d3wordcloud(ingredients_df$ingredient, ingredients_df$nb_recipes, tooltip = TRUE)
+  })
+  rval_top_ingredients <- reactive({
+    recipes_enriched %>% 
+      filter(cuisine == input$cuisine) %>% 
+      arrange(desc(tf_idf)) %>% 
+      head(input$nb_ingredients) %>% 
+      mutate(ingredient = forcats::fct_reorder(ingredient, tf_idf))
+  })
+  output$plot_top_ingredients <- plotly::renderPlotly({
+    rval_top_ingredients() %>%
+      ggplot(aes(x = ingredient, y = tf_idf)) +
+      geom_col() +
+      coord_flip()
+  })
+  output$dt_top_ingredients <- DT::renderDT({
+    recipes %>% 
+      filter(cuisine == input$cuisine) %>% 
+      count(ingredient, name = 'nb_recipes') %>% 
+      arrange(desc(nb_recipes)) %>% 
+      head(input$nb_ingredients)
+  })
+}
+shinyApp(ui = ui, server= server)
+```
+
+
